@@ -14,7 +14,9 @@ public sealed class AzureBlobDestinationTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         if (Environment.GetEnvironmentVariable("CI") is null) return;
-        _azurite = new AzuriteBuilder("mcr.microsoft.com/azure-storage/azurite:3.35.0").Build();
+        _azurite = new AzuriteBuilder("mcr.microsoft.com/azure-storage/azurite:3.37.0")
+            .WithCommand("--skipApiVersionCheck") // the SDK can be newer than the emulator
+            .Build();
         await _azurite.StartAsync();
         Directory.CreateDirectory(_dir);
     }

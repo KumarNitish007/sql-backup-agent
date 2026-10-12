@@ -109,15 +109,15 @@ public sealed class SqlServerIntegrationTests(SqlServerFixture fx) : IClassFixtu
         await CreateDatabaseAsync(_db, recovery: "FULL");
         await InsertAsync(_db, 100);
 
-        (await RunAsync(Job(BackupType.Full))).Single().Status.ShouldBe(RunStatus.Succeeded);
+        await ShouldSucceedAsync(Job(BackupType.Full));
         await InsertAsync(_db, 50);
-        (await RunAsync(Job(BackupType.Differential))).Single().Status.ShouldBe(RunStatus.Succeeded);
+        await ShouldSucceedAsync(Job(BackupType.Differential));
         await InsertAsync(_db, 25);                                    // 175 rows
         await Task.Delay(1500);
         var pointInTime = await ScalarAsync<DateTime>("SELECT SYSDATETIME()");
         await Task.Delay(1500);
         await InsertAsync(_db, 10);                                    // 185 rows
-        (await RunAsync(Job(BackupType.Log))).Single().Status.ShouldBe(RunStatus.Succeeded);
+        await ShouldSucceedAsync(Job(BackupType.Log));
 
         var history = _ctx.Catalog.Backups(database: _db);
         history.Select(b => b.Type).ShouldBe([BackupType.Log, BackupType.Differential, BackupType.Full]); // newest first, ties broken by insertion order
@@ -148,7 +148,7 @@ public sealed class SqlServerIntegrationTests(SqlServerFixture fx) : IClassFixtu
 
         var run = (await RunAsync(Job(BackupType.Differential))).Single();
 
-        run.Status.ShouldBe(RunStatus.Warning);
+        run.Status.ShouldBe(RunStatus.Warning, run.Message);
         run.Message!.ShouldContain("took a full instead");
         _ctx.Catalog.Backups(database: _db).Single().Type.ShouldBe(BackupType.Full);
     }
@@ -171,7 +171,7 @@ public sealed class SqlServerIntegrationTests(SqlServerFixture fx) : IClassFixtu
         Skip.If(fx.SkipReason is not null, fx.SkipReason);
         await CreateDatabaseAsync(_db, recovery: "FULL");
         await InsertAsync(_db, 20);
-        await RunAsync(Job(BackupType.Full));
+        await ShouldSucceedAsync(Job(BackupType.Full));
 
         var drill = new RestoreDrillRunner(_ctx, new RestoreExecutor(_ctx, NullLogger<RestoreExecutor>.Instance), NullLogger<RestoreDrillRunner>.Instance);
         var run = (await drill.RunAsync(new JobOptions { Name = "drill", Kind = JobKind.RestoreDrill, Databases = [_db] }, CancellationToken.None)).Single();
@@ -182,6 +182,12 @@ public sealed class SqlServerIntegrationTests(SqlServerFixture fx) : IClassFixtu
     }
 
     // ---------------------------------------------------------------- helpers
+
+    private async Task ShouldSucceedAsync(JobOptions job)
+    {
+        var run = (await RunAsync(job)).Single();
+        run.Status.ShouldBe(RunStatus.Succeeded, $"{job.Type} backup failed: {run.Message}");
+    }
 
     private async Task CreateDatabaseAsync(string name, string recovery)
     {
