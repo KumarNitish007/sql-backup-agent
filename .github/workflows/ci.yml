@@ -27,8 +27,10 @@ jobs:
           ! grep -q "has the following vulnerable packages" audit.txt
       # Integration tests start SQL Server 2022 (with a bind-mounted /backups folder) and Azurite
       # via Testcontainers, then take real full/diff/log backups and do a real point-in-time restore.
+      # SQL Server in the container writes backup files as its own 'mssql' user; the agent must be able to read them
+      # (in production: same user/group or a setgid folder - see README). Running the test process as root mirrors that.
       - name: Tests
-        run: dotnet test SqlBackupAgent.sln -c Release --no-build --logger "trx;LogFileName=tests.trx" --logger "console;verbosity=normal"
+        run: sudo -E env "PATH=$PATH" "DOTNET_ROOT=$DOTNET_ROOT" dotnet test SqlBackupAgent.sln -c Release --no-build --logger "trx;LogFileName=tests.trx" --logger "console;verbosity=normal"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

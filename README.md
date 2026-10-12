@@ -35,6 +35,10 @@ SqlBackupAgent records every backup's log sequence numbers, so it can always ans
 | **Operations** | Status page and JSON API (jobs, runs, backups, restore-plan preview, manual trigger with optional API key), webhook (Slack/Teams) and email alerts, Windows Service / systemd hosting, SQLite catalog that survives msdb history cleanup. |
 | **Containers** | Separate `ServerPath` / `AgentPath` staging settings for SQL Server running in Docker/Kubernetes with a mounted volume. |
 
+> **Permissions:** SQL Server writes backup files as *its* service account, and the agent must be able to read them.
+> On Windows, grant the agent's service account read/write on the staging folder. On Linux, run the agent as the same user or group
+> as SQL Server (`mssql`), or give the staging folder a shared group with the setgid bit (`chmod 2770`).
+
 ## Quick start
 
 ```bash
