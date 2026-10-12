@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rid: [win-x64, linux-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Publish self-contained single file
+        run: dotnet publish src/SqlBackupAgent -c Release -r ${{ matrix.rid }} --self-contained -p:PublishSingleFile=true -o out/${{ matrix.rid }}
+      - name: Package
+        run: |
+          cp README.md LICENSE deploy/* out/${{ matrix.rid }}/
+          cd out && zip -r ../SqlBackupAgent-${{ github.ref_name }}-${{ matrix.rid }}.zip ${{ matrix.rid }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: SqlBackupAgent-*.zip

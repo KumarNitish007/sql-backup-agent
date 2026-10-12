@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SqlBackupAgent</title>
+  <style>
+    :root { --bg:#f5f7fa; --panel:#fff; --text:#18202b; --muted:#667085; --line:#e4e7ec; --ok:#12805c; --okbg:#e3f7ee; --warn:#a15c07; --warnbg:#fff4e0; --bad:#c0362c; --badbg:#fde8e7; --accent:#2563eb; color-scheme: light; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#0e131b; --panel:#161d28; --text:#e6eaf0; --muted:#98a2b3; --line:#263041; --okbg:#0f3326; --ok:#5ee0a7; --warnbg:#3a2a10; --warn:#f5c26b; --badbg:#3d1714; --bad:#ff8a80; --accent:#7aa7ff; color-scheme: dark; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    header { display: flex; align-items: center; gap: 12px; padding: 18px 28px; border-bottom: 1px solid var(--line); background: var(--panel); }
+    header h1 { font-size: 18px; margin: 0; }
+    header small { color: var(--muted); }
+    .logo { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--accent); color: #fff; font-weight: 700; }
+    main { padding: 24px 28px; display: grid; gap: 22px; max-width: 1280px; margin: 0 auto; }
+    h2 { font-size: 15px; margin: 0 0 10px; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+    .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+    .kpi span { color: var(--muted); font-size: 12px; } .kpi b { display: block; font-size: 22px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    th { font-size: 12px; color: var(--muted); font-weight: 600; }
+    tr:last-child td { border-bottom: 0; }
+    td.msg { white-space: normal; color: var(--muted); max-width: 520px; }
+    .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .Succeeded { background: var(--okbg); color: var(--ok); } .Warning, .Skipped { background: var(--warnbg); color: var(--warn); } .Failed { background: var(--badbg); color: var(--bad); }
+    button { font: inherit; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    .muted { color: var(--muted); }
+    form { display: flex; gap: 8px; flex-wrap: wrap; padding: 14px; }
+    input { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+    pre { margin: 0 14px 14px; padding: 12px; background: var(--bg); border-radius: 8px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+<header>
+  <span class="logo">S</span>
+  <div><h1>SqlBackupAgent</h1><small id="updated">loading…</small></div>
+</header>
+<main>
+  <section class="kpis" id="kpis"></section>
+
+  <section>
+    <h2>Jobs</h2>
+    <div class="card"><table><thead><tr><th>Job</th><th>Kind</th><th>Type</th><th>Schedule</th><th>Next run</th><th>Last result</th><th></th></tr></thead><tbody id="jobs"></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>Recent runs</h2>
+    <div class="card"><table><thead><tr><th>When</th><th>Job</th><th>Database</th><th>Status</th><th>Message</th></tr></thead><tbody id="runs"></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>Restore planner</h2>
+    <div class="card">
+      <form id="plan"><input name="database" placeholder="Database" required><input name="at" placeholder="Point in time (yyyy-MM-dd HH:mm:ss, optional)" size="40"><button>Plan restore</button></form>
+      <pre id="planOut" class="muted">Pick a database to see which backups would be restored, in order.</pre>
+    </div>
+  </section>
+</main>
+<script>
+  const el = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const when = d => d ? new Date(d).toLocaleString() : '—';
+  const size = b => b > 1e9 ? (b / 1e9).toFixed(1) + ' GB' : b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.round(b / 1e3) + ' KB';
+
+  async function load() {
+    const [jobs, runs, backups] = await Promise.all(['/api/jobs', '/api/runs?limit=50', '/api/backups?limit=500'].map(u => fetch(u).then(r => r.json())));
+    const failed24 = runs.filter(r => r.status === 'Failed' && Date.now() - new Date(r.startedUtc) < 864e5).length;
+    el('kpis').innerHTML = [
+      ['Jobs', jobs.length], ['Databases protected', new Set(backups.map(b => b.database)).size],
+      ['Backups kept', backups.length], ['Stored size', size(backups.reduce((s, b) => s + b.sizeBytes, 0))], ['Failures (24 h)', failed24]
+    ].map(([k, v]) => `<div class="kpi"><span>${k}</span><b>${esc(v)}</b></div>`).join('');
+
+    el('jobs').innerHTML = jobs.map(j => `<tr><td><b>${esc(j.name)}</b></td><td>${esc(j.kind)}</td><td>${esc(j.type)}</td><td><code>${esc(j.schedule)}</code></td>
+      <td>${j.enabled ? when(j.nextRun) : '<span class="muted">disabled</span>'}</td><td class="msg">${j.running ? 'Running…' : esc(j.lastResult ?? '—')}</td>
+      <td><button data-job="${esc(j.name)}" ${j.running ? 'disabled' : ''}>Run now</button></td></tr>`).join('');
+
+    el('runs').innerHTML = runs.map(r => `<tr><td>${when(r.startedUtc)}</td><td>${esc(r.job)}</td><td>${esc(r.database)}</td>
+      <td><span class="pill ${esc(r.status)}">${esc(r.status)}</span></td><td class="msg">${esc(r.message)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No runs yet.</td></tr>';
+    el('updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  }
+
+  el('jobs').addEventListener('click', async e => {
+    const job = e.target.dataset?.job;
+    if (!job) return;
+    e.target.disabled = true;
+    await fetch(`/api/jobs/${encodeURIComponent(job)}/run`, { method: 'POST' });
+    setTimeout(load, 800);
+  });
+
+  el('plan').addEventListener('submit', async e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const res = await fetch(`/api/restore-plan?database=${encodeURIComponent(f.get('database'))}&at=${encodeURIComponent(f.get('at'))}`);
+    const body = await res.json();
+    el('planOut').textContent = res.ok
+      ? `Restores ${body.database} to ${new Date(body.restoresTo).toLocaleString()}\n\n` + body.steps.map((s, i) => `${i + 1}. ${s.type.padEnd(12)} ${s.fileName}${s.stopAtApplies ? '  (STOPAT)' : ''}`).join('\n')
+      : body.detail;
+  });
+
+  load();
+  setInterval(load, 15000);
+</script>
+</body>
+</html>

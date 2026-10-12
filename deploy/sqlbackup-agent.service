@@ -1,0 +1,20 @@
+# systemd unit for Linux. Copy the published folder to /opt/sqlbackup-agent, then:
+#   sudo cp sqlbackup-agent.service /etc/systemd/system/ && sudo systemctl enable --now sqlbackup-agent
+[Unit]
+Description=SQL Server Backup Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+WorkingDirectory=/opt/sqlbackup-agent
+ExecStartPre=/opt/sqlbackup-agent/SqlBackupAgent validate
+ExecStart=/opt/sqlbackup-agent/SqlBackupAgent
+User=sqlbackup
+Restart=on-failure
+RestartSec=30
+# Secrets (connection strings, webhook URL, SMTP password) belong in an environment file readable only by root/sqlbackup:
+EnvironmentFile=-/etc/sqlbackup-agent/secrets.env
+
+[Install]
+WantedBy=multi-user.target
